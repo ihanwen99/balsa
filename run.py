@@ -68,6 +68,8 @@ from pg_executor import dbmsx_executor
 import train_utils
 import experiments  # noqa # pylint: disable=unused-import
 
+import conformal_prediction as cp
+
 FLAGS = flags.FLAGS
 flags.DEFINE_string('run', 'Balsa_JOBRandSplit', 'Experiment config to run.')
 flags.DEFINE_boolean('local', False,
@@ -1824,7 +1826,7 @@ class BalsaAgent(object):
             plan_physical=p.plan_physical,
             use_plan_restrictions=p.real_use_plan_restrictions)
 
-    def RunOneIter(self):
+    def RunOneIter(self, iter):
         p = self.params
         self.curr_iter_skipped_queries = 0
         # Train the model.
@@ -1839,7 +1841,7 @@ class BalsaAgent(object):
         to_execute, execution_results = self.PlanAndExecute(model,
                                                             planner,
                                                             is_test=False)
-        # Add exeuction results to the experience buffer.
+        # Add execution results to the experience buffer.
         iter_total_latency, has_timeouts = self.FeedbackExecution(
             to_execute, execution_results)
         # Logging.
@@ -1863,7 +1865,11 @@ class BalsaAgent(object):
                 to_log.append(('iter_final_lr', model.latest_per_iter_lr,
                                self.curr_value_iter))
             self.LogScalars(to_log)
-        self.SaveBestPlans()
+        self.SaveBestPlans(iter)
+
+        # Run Conformal Prediction
+        stop_training = self.RunConformalPrediction()
+
         if (self.curr_value_iter + 1) % 5 == 0:
             self.SaveAgent(model, iter_total_latency)
         # Run and log test queries.
@@ -1894,9 +1900,35 @@ class BalsaAgent(object):
                     self.EvaluateTestSet(model, planner, tag='latency_test_swa')
                     self.SwapMovingAverage(model, moving_average='swa')
 
-        return has_timeouts
+        return has_timeouts, stop_training
 
-    def SaveBestPlans(self):
+    def RunConformalPrediction(self):
+        if self.curr_value_iter == 0:
+            return
+
+        stop_training = False
+        best_plans_dir_curr_itr = os.path.join(self.wandb_logger.experiment.dir,
+                                      'best_plans/', str(self.curr_value_iter))
+        best_plans_dir_prev_itr = os.path.join(self.wandb_logger.experiment.dir,
+                                      'best_plans/', str(self.curr_value_iter - 1))
+
+        latencies_curr_itr = pd.read_csv(os.path.join(best_plans_dir_curr_itr, 'latencies.txt'))
+        latencies_prev_itr = pd.read_csv(os.path.join(best_plans_dir_prev_itr, 'latencies.txt'))
+        
+        error, accuracy, total_latency = cp.calculate_error(latencies_prev_itr, latencies_curr_itr)
+        if error <= 1000.0 and accuracy >= 0.9:
+            stop_training = True
+
+        conformal_score_file = os.path.join(best_plans_dir_curr_itr, 'conformal_score.txt')
+        with open(conformal_score_file, 'w') as file:
+            file.write(f'Error: {error}\n')
+            file.write(f'Accuracy: {accuracy}\n')
+            file.write(f'Total Latency: {total_latency}\n')
+            file.write(f'Stop Training: {stop_training}\n')
+
+        return stop_training
+
+    def SaveBestPlans(self, iter):
         """Saves the best plans found so far.
 
         Write to best_plans/, under the run directory managed by wandb:
@@ -1912,7 +1944,7 @@ class BalsaAgent(object):
         """
         p = self.params
         best_plans_dir = os.path.join(self.wandb_logger.experiment.dir,
-                                      'best_plans/')
+                                      'best_plans/', str(iter))
         qnames = []
         latencies = []
         sqls = []
@@ -2097,8 +2129,12 @@ class BalsaAgent(object):
             self.test_nodes = plans_lib.FilterScansOrJoins(self.test_nodes)
 
         while self.curr_value_iter < p.val_iters:
-            has_timeouts = self.RunOneIter()
+            has_timeouts, stop_training = self.RunOneIter(self.curr_value_iter)
             self.LogTimings()
+
+            if stop_training:
+                print("Conformal prediction made the decision to stop training")
+                break
 
             if (p.early_stop_on_skip_fraction is not None and
                     self.curr_iter_skipped_queries >=
@@ -2142,7 +2178,7 @@ def Main(argv):
     # Override params here for quick debugging.
     # p.sim_checkpoint = None
     # p.epochs = 1
-    # p.val_iters = 0
+    p.val_iters = 10
     # p.query_glob = ['7*.sql']
     # p.test_query_glob = ['7c.sql']
     # p.search_until_n_complete_plans = 1

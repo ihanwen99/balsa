@@ -1,10 +1,11 @@
-ray==1.9.2
+ray
+protobuf==3.20.0
 pandas
 pytorch_lightning==0.9.0
-torch==1.4.0
+torch
 wandb
 psycopg2-binary==2.8.5
-absl-py==0.9.0
+absl-py
 numpy==1.18.1
 networkx
 ipdb
