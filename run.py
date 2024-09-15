@@ -1868,7 +1868,10 @@ class BalsaAgent(object):
         self.SaveBestPlans(iter)
 
         # Run Conformal Prediction
-        stop_training = self.RunConformalPrediction()
+        if(p.should_run_cp):
+            stop_training = self.RunConformalPrediction()
+        else:
+            stop_training = False
 
         if (self.curr_value_iter + 1) % 5 == 0:
             self.SaveAgent(model, iter_total_latency)
@@ -2130,6 +2133,7 @@ class BalsaAgent(object):
 
         while self.curr_value_iter < p.val_iters:
             has_timeouts, stop_training = self.RunOneIter(self.curr_value_iter)
+
             self.LogTimings()
 
             if stop_training:
@@ -2178,6 +2182,7 @@ def Main(argv):
     # Override params here for quick debugging.
     # p.sim_checkpoint = None
     # p.epochs = 1
+    # p.should_run_cp = False
     p.val_iters = 10
     # p.query_glob = ['7*.sql']
     # p.test_query_glob = ['7c.sql']

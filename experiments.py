@@ -117,6 +117,7 @@ class BalsaParams(object):
         p.Define('epochs', 100, 'Num epochs to train.')
         p.Define('bs', 1024, 'Batch size.')
         p.Define('val_iters', 500, '# of value iterations.')
+        p.Define('should_run_cp', False, 'Should run conformal prediction or not.')
         p.Define('increment_iter_despite_timeouts', False,
                  'Increment the iteration counter even if timeouts occurred?')
         p.Define('loss_type', None, 'Options: None (MSE), mean_qerror.')
