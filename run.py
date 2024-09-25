@@ -217,6 +217,15 @@ def HintStr(node, with_physical_hints, engine):
     assert engine == 'dbmsx', engine
     return DbmsxNodeToHintStr(node, with_physical_hints=with_physical_hints)
 
+def get_actual_runtime(plan, indent=0):
+    indent_str = '  ' * indent
+    nodeType = plan["Node Type"]
+    print(f"{indent_str} {nodeType}", end=" ")
+    print(f"Actual Total Time: {plan.get('Actual Total Time', 'N/A')}")
+    # Recursively print subplans, if any
+    if 'Plans' in plan:
+        for subplan in plan['Plans']:
+            get_actual_runtime(subplan, indent + 1)
 
 def ParseExecutionResult(result_tup,
                          query_name,
@@ -239,6 +248,7 @@ def ParseExecutionResult(result_tup,
     result = result_tup.result
     has_timeout = result_tup.has_timeout
     server_ip = result_tup.server_ip
+    json_dict = {}
     if has_timeout:
         assert not result, result
     if engine == 'dbmsx':
@@ -249,6 +259,11 @@ def ParseExecutionResult(result_tup,
         else:
             json_dict = result[0][0][0]
             real_cost = json_dict['Execution Time']
+
+    if(json_dict):
+        print(f"Actual run time for {query_name}")
+        get_actual_runtime(json_dict["Plan"])
+
     if hint_str is not None:
         # Check that the hint has been respected.  No need to check if running
         # baseline.
