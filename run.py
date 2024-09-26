@@ -75,6 +75,22 @@ flags.DEFINE_string('run', 'Balsa_JOBRandSplit', 'Experiment config to run.')
 flags.DEFINE_boolean('local', False,
                      'Whether to use local engine for query execution.')
 
+def updateCheckpointAndReadMetadata(pt_path):
+    # Step 1: 修改文件路径，将 'checkpoint.pt' 替换为 'checkpoint-metadata.txt'
+    metadata_file = pt_path.replace("checkpoint.pt", "checkpoint-metadata.txt")
+
+    # Step 2: 读取文件，提取 'value_iter' 后面的数值
+    if os.path.exists(metadata_file):
+        with open(metadata_file, 'r') as file:
+            content = file.read().strip()
+            if content.startswith("value_iter,"):
+                previous_iteration = int(content.split(",")[1].strip())
+                return previous_iteration
+            else:
+                raise ValueError("文件内容格式不正确，应该以 'value_iter,' 开头")
+    else:
+        raise FileNotFoundError(f"文件 {metadata_file} 不存在")
+
 
 def GetDevice():
     return 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -1074,7 +1090,11 @@ class BalsaAgent(object):
         if p.agent_checkpoint is not None and self.curr_value_iter == 0:
             ckpt = torch.load(p.agent_checkpoint,
                               map_location=lambda storage, loc: storage)
-            model.load_state_dict(ckpt['state_dict'])
+
+            model.load_state_dict(ckpt)
+            previous_iteration = updateCheckpointAndReadMetadata(p.agent_checkpoint)+1
+            print('Previous already execute {} iters'.format(previous_iteration))
+
             self.model = model.model
             print('Loaded value network checkpoint at iter',
                   self.curr_value_iter)
@@ -1230,6 +1250,46 @@ class BalsaAgent(object):
         # engine's latencies.  This mainly affects debug strings.
         Save(self.workload, './data/initial_policy_data.pkl')
         self.LogExpertExperience(self.train_nodes, self.test_nodes)
+
+    def HanwenLoadModel(self, train_from_scratch=False):
+        p = self.params
+        train_ds, train_loader, _, val_loader = self._MakeDatasetAndLoader(
+            log=not train_from_scratch)
+
+        plans_dataset = train_ds.dataset if isinstance(
+            train_ds, torch.utils.data.Subset) else train_ds
+
+        # Direct load the model without branching
+        # I follow the Balsa's orginal code style - mixing these `model`
+        model = MakeModel(p, self.exp, plans_dataset)
+        # Wrap it to get pytorch_lightning niceness.
+        model = BalsaModel(
+            p,
+            model,
+            loss_type=p.loss_type,
+            torch_invert_cost=plans_dataset.TorchInvertCost,
+            query_featurizer=self.exp.query_featurizer,
+            perturb_query_features=p.perturb_query_features,
+            l2_lambda=p.l2_lambda,
+            learning_rate=self.lr_schedule.Get()
+            if self.adaptive_lr_schedule is None else
+            self.adaptive_lr_schedule.Get(),
+            optimizer_state_dict=self.prev_optimizer_state_dict,
+            reduce_lr_within_val_iter=p.reduce_lr_within_val_iter)
+        print('iter', self.curr_value_iter, 'lr', model.learning_rate)
+
+        ckpt = torch.load(p.agent_checkpoint, map_location=lambda storage, loc: storage)
+        model.load_state_dict(ckpt)
+        previous_iteration = updateCheckpointAndReadMetadata(p.agent_checkpoint) + 1
+        print('Previous already execute {} iters'.format(previous_iteration))
+
+        self.model = model.model
+        print('Loaded value network checkpoint at iter', self.curr_value_iter)
+        ReportModel(model)
+
+        model = self._MakeModel(plans_dataset, train_from_scratch)
+
+        return model, plans_dataset
 
     def Train(self, train_from_scratch=False):
         p = self.params
@@ -2202,6 +2262,8 @@ def Main(argv):
     # p.query_glob = ['7*.sql']
     # p.test_query_glob = ['7c.sql']
     # p.search_until_n_complete_plans = 1
+    p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20240923_220508-n3wgo5so/files/checkpoint.pt"
+    p.eval_mode = True
 
     agent = BalsaAgent(p)
     agent.Run()
