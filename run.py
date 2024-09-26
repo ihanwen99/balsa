@@ -1905,7 +1905,11 @@ class BalsaAgent(object):
         p = self.params
         self.curr_iter_skipped_queries = 0
         # Train the model.
-        model, dataset = self.Train()
+        # Hanwen want to make it support evaluate only
+        if p.eval_mode:
+            model, dataset = self.HanwenLoadModel()
+        else:
+            model, dataset = self.Train()
         # Replay buffer reset (if enabled).
         if self.curr_value_iter == p.replay_buffer_reset_at_iter:
             self.exp.DropAgentExperience()
@@ -2078,15 +2082,12 @@ class BalsaAgent(object):
         # Model weights can be reloaded with:
         #   model = TheModelClass(*args, **kwargs)
         #   model.load_state_dict(torch.load(PATH))
-        ckpt_path = os.path.join(self.wandb_logger.experiment.dir,
-                                 'checkpoint.pt')
+        ckpt_path = os.path.join(self.wandb_logger.experiment.dir, 'checkpoint_{}.pt'.format(self.curr_value_iter))
         torch.save(model.state_dict(), ckpt_path)
         SaveText(
-            'value_iter,{}'.format(self.curr_value_iter),
-            os.path.join(self.wandb_logger.experiment.dir,
-                         'checkpoint-metadata.txt'))
-        print('Saved iter={} checkpoint to: {}'.format(self.curr_value_iter,
-                                                       ckpt_path))
+            'value_iter, {}'.format(self.curr_value_iter),
+            os.path.join(self.wandb_logger.experiment.dir, 'checkpoint-metadata.txt'))
+        print('Saved iter={} checkpoint to: {}'.format(self.curr_value_iter, ckpt_path))
 
         # Replay buffer.  Saved under data/.
         self._SaveReplayBuffer(iter_total_latency)
@@ -2258,12 +2259,19 @@ def Main(argv):
     # p.sim_checkpoint = None
     # p.epochs = 1
     # p.should_run_cp = False
-    p.val_iters = 10
-    # p.query_glob = ['7*.sql']
-    # p.test_query_glob = ['7c.sql']
+    p.val_iters = 500
+    p.query_glob = ['*.sql']
+    p.test_query_glob = ['1d.sql', '1b.sql', '2c.sql', '2a.sql', '3a.sql', '4b.sql', '5a.sql',
+ '6b.sql', '6a.sql', '6c.sql', '7a.sql', '8a.sql', '8b.sql', '9d.sql',
+ '9a.sql', '10c.sql', '11d.sql', '11a.sql', '12b.sql', '13d.sql', '13c.sql',
+ '14a.sql', '15c.sql', '15b.sql', '16a.sql', '16c.sql', '17e.sql', '17b.sql',
+ '17f.sql', '18c.sql', '19a.sql', '19b.sql', '20a.sql', '21c.sql', '22d.sql',
+ '22a.sql', '23a.sql', '24a.sql', '25a.sql', '26a.sql', '27a.sql', '28a.sql',
+ '29a.sql', '30b.sql', '31b.sql', '32b.sql', '33a.sql']
+
     # p.search_until_n_complete_plans = 1
-    p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20240923_220508-n3wgo5so/files/checkpoint.pt"
-    p.eval_mode = True
+    # p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20240923_220508-n3wgo5so/files/checkpoint.pt"
+    # p.eval_mode = True
 
     agent = BalsaAgent(p)
     agent.Run()
