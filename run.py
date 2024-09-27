@@ -1260,7 +1260,7 @@ class BalsaAgent(object):
             train_ds, torch.utils.data.Subset) else train_ds
 
         # Direct load the model without branching
-        # I follow the Balsa's orginal code style - mixing these `model`
+        # I follow the Balsa's original code style - mixing these `model`
         model = MakeModel(p, self.exp, plans_dataset)
         # Wrap it to get pytorch_lightning niceness.
         model = BalsaModel(

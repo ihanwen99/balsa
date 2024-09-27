@@ -504,6 +504,7 @@ class Optimizer(object):
                 avoid_eq_filters=avoid_eq_filters)
             costs = self.infer(query_node,
                                [join for join, _, _ in possible_plans])
+            # TODO: Online Verification
             valid_costs, valid_new_states = self._make_new_states(
                 state, costs, possible_plans)
 
@@ -542,6 +543,8 @@ class Optimizer(object):
 
             fringe = sorted(fringe, key=lambda x: x[0])
             fringe = fringe[:beam_size]
+            # TODO: Online Verification
+            # Our targets are in the fringe and with the shape of (valid_cost, new_state)
 
         planning_time = (time.time() - planning_start_t) * 1e3
         print('Planning took {:.1f}ms'.format(planning_time))
