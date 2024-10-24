@@ -27,13 +27,13 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 class PlannerConfig(
-        collections.namedtuple(
-            'PlannerConfig',
-            [
-                'search_space', 'enable_nestloop', 'enable_hashjoin',
-                'enable_mergejoin'
-            ],
-        )):
+    collections.namedtuple(
+        'PlannerConfig',
+        [
+            'search_space', 'enable_nestloop', 'enable_hashjoin',
+            'enable_mergejoin'
+        ],
+    )):
     """Experimental: a simple tuple recording what ops can be planned."""
 
     @classmethod
@@ -106,19 +106,21 @@ class Optimizer(object):
     """Creates query execution plans using learned model."""
 
     def __init__(
-        self,
-        workload_info,
-        plan_featurizer,
-        parent_pos_featurizer,
-        query_featurizer,
-        inverse_label_transform_fn,
-        model,
-        tree_conv=False,
-        beam_size=10,
-        search_until_n_complete_plans=1,
-        plan_physical=False,
-        use_label_cache=True,
-        use_plan_restrictions=True,
+            self,
+            workload_info,
+            plan_featurizer,
+            parent_pos_featurizer,
+            query_featurizer,
+            inverse_label_transform_fn,
+            model,
+            tree_conv=False,
+            beam_size=10,
+            search_until_n_complete_plans=1,  # Here we will have this
+            plan_physical=False,
+            use_label_cache=True,
+            use_plan_restrictions=True,
+            # Inject the selection boolean here
+            cp_assist=False,
     ):
         self.workload_info = workload_info
         self.plan_featurizer = plan_featurizer
@@ -127,7 +129,9 @@ class Optimizer(object):
         self.inverse_label_transform_fn = inverse_label_transform_fn
         self.use_label_cache = use_label_cache
         self.use_plan_restrictions = use_plan_restrictions
+        self.cp_assist = cp_assist
 
+        print("CP Assist LQO: ", self.cp_assist)
         # Plan search params
         if not plan_physical:
             jts = workload_info.join_types
@@ -235,7 +239,7 @@ class Optimizer(object):
                 cost = self.value_network(query_feat, plan_feat).cpu().numpy()
 
             cost = self.inverse_label_transform_fn(cost)
-            plan_labels = cost.reshape(-1,).tolist()
+            plan_labels = cost.reshape(-1, ).tolist()
 
             if self.use_label_cache:
                 # Update the cache with the labels.
@@ -486,8 +490,7 @@ class Optimizer(object):
         is_eps_greedy_triggered = False
 
         terminal_states = []
-        while len(terminal_states) < self.search_until_n_complete_plans and \
-              fringe:
+        while len(terminal_states) < self.search_until_n_complete_plans and fringe:
             state_cost, state = fringe.pop(0)
             MoveFromOpenToExpanded(state_cost, state)
             if len(state) == 1:
@@ -517,34 +520,66 @@ class Optimizer(object):
                     MarkInOpen(valid_cost, new_state, state_hash)
                 else:
                     prev_cost = ret
-                    assert valid_cost == prev_cost, (valid_cost, prev_cost,
-                                                     new_state, states_open,
-                                                     states_expanded)
-            r = np.random.rand()
-            if r < epsilon_greedy:
-                # Randomly pick one state in the fringe and discard the rest.
-                # Note that 'fringe' at this step can have larger than
-                # 'beam_size' elements.
-                rand_idx = np.random.randint(len(fringe))
-                new_fringe = [fringe[rand_idx]]
-                # Remove the discarded states from 'open' so that they may be
-                # able to be explored down the line.
-                for i, fringe_elem in enumerate(fringe):
-                    if i == rand_idx:
-                        continue
-                    _state_cost, _state = fringe_elem
-                    RemoveFromOpen(_state_cost, _state)
-                # Swap.
-                fringe = new_fringe
+                    assert valid_cost == prev_cost, (valid_cost, prev_cost, new_state, states_open, states_expanded)
 
-                # Debugging.
-                self.total_random_triggers += 1
-                is_eps_greedy_triggered = True
+            # r = np.random.rand()
+            # if r < epsilon_greedy: # Hanwen: Currently Disable by Parameter Setting
+            #     # Randomly pick one state in the fringe and discard the rest.
+            #     # Note that 'fringe' at this step can have larger than
+            #     # 'beam_size' elements.
+            #     rand_idx = np.random.randint(len(fringe))
+            #     new_fringe = [fringe[rand_idx]]
+            #     # Remove the discarded states from 'open' so that they may be
+            #     # able to be explored down the line.
+            #     for i, fringe_elem in enumerate(fringe):
+            #         if i == rand_idx:
+            #             continue
+            #         _state_cost, _state = fringe_elem
+            #         RemoveFromOpen(_state_cost, _state)
+            #     # Swap.
+            #     fringe = new_fringe
+            #
+            #     # Debugging.
+            #     self.total_random_triggers += 1
+            #     is_eps_greedy_triggered = True
 
-            fringe = sorted(fringe, key=lambda x: x[0])
+            # Will get this from Shashank
+            cp_hashmap = {
+
+            }
+
+            short = {
+                "Hash Join": "HJ",
+            }
+
+            # Given one state, return the related Quantile
+            def extract_substructure(state):
+                parent_node = state[0].node_type  # Hash Join
+                print("parent_node: ", parent_node)
+                left_child = state[0].children[0].node_type  # Nested Loop
+                right_child = state[0].children[1].node_type  # Merge Join
+                return "({},{},{})".format(short[parent_node], short[left_child], short[right_child])
+
+            def cp_guaranteed_upperbound(cost, state):
+                # 1. Extract substructure based on state
+                substructure = extract_substructure(state)
+                # 2. Fetch the related quantile -> C
+                quantile_c = cp_hashmap[substructure]
+                # 3. Return the upperbound
+                return cost + quantile_c
+
+            if self.cp_assist:  # !!! Will inject the CP here
+                fringe = sorted(fringe, key=lambda x: cp_guaranteed_upperbound(x[0], x[1]))
+            else:  # Baseline
+                fringe = sorted(fringe, key=lambda x: x[0])
             fringe = fringe[:beam_size]
-            # TODO: Online Verification
-            # Our targets are in the fringe and with the shape of (valid_cost, new_state)
+
+        ### From here to process the terminal_state
+        print("len(terminal_states):", len(terminal_states))
+
+        # for terminal_state in terminal_states:
+        print(terminal_states)
+        print()
 
         planning_time = (time.time() - planning_start_t) * 1e3
         print('Planning took {:.1f}ms'.format(planning_time))
@@ -553,7 +588,9 @@ class Optimizer(object):
         if verbose:
             print('terminal_states:')
         all_found = []
-        min_cost = np.min([c for c, s in terminal_states])
+
+        ## Also will change here
+        min_cost = np.min([c for c, s in terminal_states])  # c: cost, s: state
         min_cost_idx = np.argmin([c for c, s in terminal_states])
         for i, (cost, state) in enumerate(terminal_states):
             all_found.append((cost, state[0]))
