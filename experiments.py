@@ -85,7 +85,7 @@ class BalsaParams(object):
         )
         p.Define(
             'plan_physical', True,
-            'If true, plans physical scan/join operators.  '\
+            'If true, plans physical scan/join operators.  ' \
             'Otherwise, just join ordering.'
         )
         p.Define('cost_model', 'postgrescost',
@@ -96,14 +96,15 @@ class BalsaParams(object):
                  'Action space: join operators to learn and use.')
         p.Define('search_space_scan_ops',
                  ['Index Scan', 'Index Only Scan', 'Seq Scan'],
+                 # ['Index Scan', 'Seq Scan'],
                  'Action space: scan operators to learn and use.')
 
         # LR.
         p.Define('lr', 1e-3, 'Learning rate.')
         p.Define('lr_decay_rate', None, 'If supplied, use ExponentialDecay.')
         p.Define('lr_decay_iters', None, 'If supplied, use ExponentialDecay.')
-        p.Define('lr_piecewise', None, 'If supplied, use Piecewise.  Example:'\
-                 '[(0, 1e-3), (200, 1e-4)].')
+        p.Define('lr_piecewise', None, 'If supplied, use Piecewise.  Example:' \
+                                       '[(0, 1e-3), (200, 1e-4)].')
         p.Define('use_adaptive_lr', None, 'Experimental.')
         p.Define('use_adaptive_lr_decay_to_zero', None, 'Experimental.')
         p.Define('final_decay_rate', None, 'Experimental.')
@@ -129,25 +130,25 @@ class BalsaParams(object):
         p.Define('label_transforms', ['log1p', 'standardize'],
                  'Transforms for labels.')
         p.Define('label_transform_running_stats', False,
-                 'Use running mean and std to standardize labels?'\
+                 'Use running mean and std to standardize labels?' \
                  '  May affect on-policy.')
         p.Define('update_label_stats_every_iter', True,
-                 'Update mean/std stats of labels every value iteration?  This'\
+                 'Update mean/std stats of labels every value iteration?  This' \
                  'means the scaling of the prediction targers will shift.')
-        p.Define('gradient_clip_val', 0, 'Clip the gradient norm computed over'\
-                 ' all model parameters together. 0 means no clipping.')
+        p.Define('gradient_clip_val', 0, 'Clip the gradient norm computed over' \
+                                         ' all model parameters together. 0 means no clipping.')
         p.Define('early_stop_on_skip_fraction', None,
                  'If seen plans for x% of train queries produced, early stop.')
         # Validation.
         p.Define('validate_fraction', 0.1,
-                 'Sample this fraction of the dataset as the validation set.  '\
+                 'Sample this fraction of the dataset as the validation set.  ' \
                  '0 to disable validation.')
         p.Define('validate_every_n_epochs', 5,
                  'Run validation every this many training epochs.')
         p.Define(
             'validate_early_stop_patience', 3,
-            'Number of validations with no improvements before early stopping.'\
-            '  Thus, the maximum # of wasted train epochs = '\
+            'Number of validations with no improvements before early stopping.' \
+            '  Thus, the maximum # of wasted train epochs = ' \
             'this * validate_every_n_epochs).'
         )
         # Testing.
@@ -170,25 +171,25 @@ class BalsaParams(object):
             'of retraining.')
         p.Define(
             'param_noise', 0.0,
-            'If non-zero, add Normal(0, std=param_noise) to Linear weights '\
+            'If non-zero, add Normal(0, std=param_noise) to Linear weights ' \
             'of the pre-trained net.')
         p.Define(
             'param_tau', 1.0,
             'If non-zero, real_model_t = tau * real_model_tm1 + (1-tau) * SIM.')
         p.Define(
             'use_ema_source', False,
-            'Use an exponential moving average of source networks?  If so, tau'\
-            ' is used as model_t := source_t :='\
+            'Use an exponential moving average of source networks?  If so, tau' \
+            ' is used as model_t := source_t :=' \
             ' tau * source_(t-1) + (1-tau) * model_(t-1).'
         )
         p.Define(
             'skip_sim_init_iter_1p', False,
-            'Starting from the 2nd iteration, skip initializing from '\
+            'Starting from the 2nd iteration, skip initializing from ' \
             'simulation model?'
         )
         p.Define(
             'generic_ops_only_for_min_card_cost', False,
-            'This affects sim model training and only if MinCardCost is used. '\
+            'This affects sim model training and only if MinCardCost is used. ' \
             'See sim.py for documentation.')
         p.Define(
             'sim_data_collection_intermediate_goals', True,
@@ -197,34 +198,34 @@ class BalsaParams(object):
         # Training data / replay buffer.
         p.Define(
             'init_experience', 'data/initial_policy_data.pkl',
-            'Initial data set of query plans to learn from. By default, this'\
-            ' is the expert optimizer experience collected when baseline'\
+            'Initial data set of query plans to learn from. By default, this' \
+            ' is the expert optimizer experience collected when baseline' \
             ' performance is evaluated.'
         )
         p.Define('skip_training_on_expert', True,
                  'Whether to skip training on expert plan-latency pairs.')
         p.Define(
             'dedup_training_data', True,
-            'Whether to deduplicate training data by keeping the best cost per'\
+            'Whether to deduplicate training data by keeping the best cost per' \
             ' subplan per template.'
         )
         p.Define('on_policy', False,
                  'Whether to train on only data from the latest iteration.')
         p.Define(
             'use_last_n_iters', -1,
-            'Train on data from this many latest iterations.  If on_policy,'\
-            ' this flag is ignored and treated as 1 (latest iter).  -1 means'\
+            'Train on data from this many latest iterations.  If on_policy,' \
+            ' this flag is ignored and treated as 1 (latest iter).  -1 means' \
             ' train on all previous iters.')
         p.Define('skip_training_on_timeouts', False,
                  'Skip training on executions that were timeout events?')
         p.Define(
             'use_new_data_only', False,
-            'Experimental; has effects if on_policy or use_last_n_iters > 0.'\
+            'Experimental; has effects if on_policy or use_last_n_iters > 0.' \
             '  Currently only implemented in the dedup_training_data branch.')
         p.Define(
-            'per_transition_sgd_steps', -1, '-1 to disable.  Takes effect only'\
-            ' for when p.use_last_n_iters>0 and p.epochs=1.  This controls the'\
-            ' average number of SGD updates taken on each transition.')
+            'per_transition_sgd_steps', -1, '-1 to disable.  Takes effect only' \
+                                            ' for when p.use_last_n_iters>0 and p.epochs=1.  This controls the' \
+                                            ' average number of SGD updates taken on each transition.')
         p.Define('physical_execution_hindsight', False,
                  'Apply hindsight labeling to physical execution data?')
         p.Define(
@@ -253,11 +254,11 @@ class BalsaParams(object):
                  'If true, use SimQueryFeaturizer to produce query features.')
         # Featurization.
         p.Define('perturb_query_features', None,
-                 'If not None, randomly perturb query features on each forward'\
-                 ' pass, and this flag specifies '\
-                 '(perturb_prob_per_table, [scale_min, scale_max]).  '\
-                 'A multiplicative scale is drawn from '\
-                 'Unif[scale_min, scale_max].  Only performed when training '\
+                 'If not None, randomly perturb query features on each forward' \
+                 ' pass, and this flag specifies ' \
+                 '(perturb_prob_per_table, [scale_min, scale_max]).  ' \
+                 'A multiplicative scale is drawn from ' \
+                 'Unif[scale_min, scale_max].  Only performed when training ' \
                  'and using a query featurizer with perturbation implemented.')
 
         # Modeling: Transformer (deprecated).  Enabled when tree_conv is False.
@@ -272,9 +273,9 @@ class BalsaParams(object):
             'search_method', 'beam_bk',
             'Algorithm used to search for execution plans with cost model.')
         p.Define(
-            'search_until_n_complete_plans', 10,
-            'Keep doing plan search for each query until this many complete'\
-            ' plans have been found.  Returns the predicted cheapest one out'\
+            'search_until_n_complete_plans', 3,
+            'Keep doing plan search for each query until this many complete' \
+            ' plans have been found.  Returns the predicted cheapest one out' \
             ' of them.  Recommended: 10.')
         p.Define('planner_config', None, 'See optimizer.py#PlannerConfig.')
         p.Define(
@@ -288,8 +289,8 @@ class BalsaParams(object):
         # Exploration during inference.
         p.Define(
             'epsilon_greedy', 0,
-            'Epsilon-greedy policy: with epsilon probability, execute a'\
-            ' randomly picked plan out of all complete plans found, rather'\
+            'Epsilon-greedy policy: with epsilon probability, execute a' \
+            ' randomly picked plan out of all complete plans found, rather' \
             ' than the predicted-cheapest one out of them.')
         p.Define('epsilon_greedy_random_transform', False,
                  'Apply eps-greedy to randomly transform the best found plan?')
@@ -301,10 +302,10 @@ class BalsaParams(object):
                  'Sample an action from the soft V-distribution?')
         p.Define('explore_visit_counts', False, 'Explores using a visit count?')
         p.Define('explore_visit_counts_sort', False,
-                 'Explores by executing the plan with the smallest '\
+                 'Explores by executing the plan with the smallest ' \
                  '(visit count, predicted latency) out of k-best plans?')
         p.Define('explore_visit_counts_latency_sort', False,
-                 'Explores using explore_visit_counts_sort if there exists '\
+                 'Explores using explore_visit_counts_sort if there exists ' \
                  'a plan that has a 0 visit count. Else sorts by predicted latency.')
 
         # Safe execution.
@@ -315,16 +316,16 @@ class BalsaParams(object):
         p.Define('timeout_slack', 2,
                  'A multiplier: timeout := timeout_slack * max_query_latency.')
         p.Define('relax_timeout_factor', None,
-                 'If not None, a positive factor to multiply with the current'\
+                 'If not None, a positive factor to multiply with the current' \
                  ' timeout when relaxation conditions are met.')
         p.Define('relax_timeout_on_n_timeout_iters', None,
-                 'If there are this many timeout iterations up to now, relax'\
+                 'If there are this many timeout iterations up to now, relax' \
                  ' the current timeout by relax_timeout_factor.')
 
         # Execution.
         p.Define('use_local_execution', False,
-                 'For query executions, connect to local engine or the remote'\
-                 ' cluster?  Non-execution EXPLAINs are always issued to'\
+                 'For query executions, connect to local engine or the remote' \
+                 ' cluster?  Non-execution EXPLAINs are always issued to' \
                  ' local.')
         p.Define('use_cache', True, 'Skip executing seen plans?')
         return p

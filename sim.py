@@ -19,16 +19,17 @@ import os
 import pickle
 import time
 
-from absl import app
-from absl import logging
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
-from pytorch_lightning import loggers as pl_loggers
 import torch
 import torch.nn.functional as F
+from absl import app
+from absl import logging
+from pytorch_lightning import loggers as pl_loggers
 
 import balsa
+import train_utils
 from balsa import costing
 from balsa import envs
 from balsa import experience
@@ -39,7 +40,6 @@ from balsa import search
 from balsa.util import dataset as ds
 from balsa.util import plans_lib
 from balsa.util import postgres
-import train_utils
 
 
 class SimModel(pl.LightningModule):
@@ -66,7 +66,7 @@ class SimModel(pl.LightningModule):
                 version=tree_conv_version)
         else:
             self.mlp = balsa.models.MakeMlp(input_size=query_feat_dims +
-                                            plan_feat_dims,
+                                                       plan_feat_dims,
                                             num_outputs=1,
                                             hiddens=mlp_hiddens,
                                             activation='relu')
@@ -110,10 +110,10 @@ class SimModel(pl.LightningModule):
             assert len(rest) == 1
             output = self.forward(query_feat, plan_feat)
         if self.loss_type == 'mean_qerror':
-            output_inverted = self.torch_invert_cost(output.reshape(-1,))
-            target_inverted = self.torch_invert_cost(target.reshape(-1,))
+            output_inverted = self.torch_invert_cost(output.reshape(-1, ))
+            target_inverted = self.torch_invert_cost(target.reshape(-1, ))
             return train_utils.QErrorLoss(output_inverted, target_inverted)
-        return F.mse_loss(output.reshape(-1,), target.reshape(-1,))
+        return F.mse_loss(output.reshape(-1, ), target.reshape(-1, ))
 
     def on_after_backward(self):
         if self.global_step % 50 == 0:
@@ -318,7 +318,7 @@ class SimQueryFeaturizerV4(plans_lib.Featurizer):
         should_scale *= (est_rows > 0)
         # Sample multipliers ~ Unif[l, r].
         multipliers = torch.rand(est_rows.shape, device=est_rows.device) * (
-            unif[1] - unif[0]) + unif[0]
+                unif[1] - unif[0]) + unif[0]
         multipliers *= should_scale
         # Now, the 0 entries mean "should not scale", which needs to be
         # translated into using a multiplier of 1.
@@ -412,14 +412,14 @@ class Sim(object):
     def Params(cls):
         p = hyperparams.InstantiableParams(cls)
         # Train.
-        p.Define('epochs', 100, 'Maximum training epochs.  '\
-                 'Early-stopping may kick in.')
-        p.Define('gradient_clip_val', 0, 'Clip the gradient norm computed over'\
-                 ' all model parameters together. 0 means no clipping.')
+        p.Define('epochs', 100, 'Maximum training epochs.  ' \
+                                'Early-stopping may kick in.')
+        p.Define('gradient_clip_val', 0, 'Clip the gradient norm computed over' \
+                                         ' all model parameters together. 0 means no clipping.')
         p.Define('bs', 2048, 'Batch size.')
         # Validation.
         p.Define('validate_fraction', 0.1,
-                 'Sample this fraction of the dataset as the validation set.  '\
+                 'Sample this fraction of the dataset as the validation set.  ' \
                  '0 to disable validation.')
         # Search, train-time.
         p.Define('search', search.DynamicProgramming.Params(),
@@ -437,13 +437,13 @@ class Sim(object):
                  'Params of the Workload, i.e., a set of queries.')
         # Data collection.
         p.Define('skip_data_collection_geq_num_rels', None,
-                 'If specified, do not collect data for queries with at '\
+                 'If specified, do not collect data for queries with at ' \
                  'least this many number of relations.')
         p.Define(
             'generic_ops_only_for_min_card_cost', False,
             'If using MinCardCost, whether to enumerate generic ops only.')
         p.Define('sim_data_collection_intermediate_goals', True,
-                 'For each query, also collect sim data with intermediate '\
+                 'For each query, also collect sim data with intermediate ' \
                  'query goals?')
         # Featurizations.
         p.Define('plan_featurizer_cls', SimPlanFeaturizer,
@@ -735,7 +735,7 @@ class Sim(object):
         simulation_time = time.time() - start
 
         logging.info('Collection done, stats:')
-        logging.info('  num_queries={} num_collected_queries={} num_points={}'\
+        logging.info('  num_queries={} num_collected_queries={} num_points={}' \
                      ' latency_s={:.1f}'.format(
             len(self.train_nodes), num_collected, len(self.simulation_data),
             simulation_time))

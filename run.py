@@ -30,24 +30,30 @@ import pprint
 import signal
 import time
 
-from absl import app
-from absl import flags
 import numpy as np
 import pandas as pd
 import psycopg2
 import pytorch_lightning as pl
-from pytorch_lightning import loggers as pl_loggers
 import ray
 import ray.util
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim import lr_scheduler
 import torch.utils.data
+from absl import app
+from absl import flags
+from pytorch_lightning import loggers as pl_loggers
+from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
-import wandb
 
 import balsa
+import balsa.optimizer as optim
+import conformal_prediction as cp
+import experiments  # noqa # pylint: disable=unused-import
+import pg_executor
+import sim as sim_lib
+import train_utils
+import wandb
 from balsa import costing
 from balsa import envs
 from balsa import execution
@@ -57,23 +63,16 @@ from balsa.models.transformer import ReportModel
 from balsa.models.transformer import Transformer
 from balsa.models.transformer import TransformerV2
 from balsa.models.treeconv import TreeConvolution
-import balsa.optimizer as optim
 from balsa.util import dataset as ds
 from balsa.util import plans_lib
 from balsa.util import postgres
-
-import sim as sim_lib
-import pg_executor
 from pg_executor import dbmsx_executor
-import train_utils
-import experiments  # noqa # pylint: disable=unused-import
-
-import conformal_prediction as cp
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('run', 'Balsa_JOBRandSplit', 'Experiment config to run.')
 flags.DEFINE_boolean('local', False,
                      'Whether to use local engine for query execution.')
+
 
 def updateCheckpointAndReadMetadata(pt_path):
     # Step 1: 修改文件路径，将 'checkpoint.pt' 替换为 'checkpoint-metadata.txt'
@@ -177,7 +176,7 @@ def ExecuteSql(query_name,
         A ray.ObjectRef of the above.
     """
     # Unused args.
-    del query_name, hinted_plan, query_node, predicted_latency, found_plans,\
+    del query_name, hinted_plan, query_node, predicted_latency, found_plans, \
         predicted_costs, silent, is_test, plan_physical
 
     assert engine in ('postgres', 'dbmsx'), engine
@@ -233,6 +232,7 @@ def HintStr(node, with_physical_hints, engine):
     assert engine == 'dbmsx', engine
     return DbmsxNodeToHintStr(node, with_physical_hints=with_physical_hints)
 
+
 def get_actual_runtime(plan, indent=0):
     indent_str = '  ' * indent
     nodeType = plan["Node Type"]
@@ -242,6 +242,7 @@ def get_actual_runtime(plan, indent=0):
     if 'Plans' in plan:
         for subplan in plan['Plans']:
             get_actual_runtime(subplan, indent + 1)
+
 
 def ParseExecutionResult(result_tup,
                          query_name,
@@ -276,7 +277,7 @@ def ParseExecutionResult(result_tup,
             json_dict = result[0][0][0]
             real_cost = json_dict['Execution Time']
 
-    if(json_dict):
+    if (json_dict):
         print(f"Actual run time for {query_name}")
         get_actual_runtime(json_dict["Plan"])
 
@@ -302,8 +303,7 @@ def ParseExecutionResult(result_tup,
         if do_hint_check and hint_str != executed_hint_str:
             print('initial\n', hint_str)
             print('after\n', executed_hint_str)
-            msg = 'Hint not respected for {}; server_ip={}'.format(
-                query_name, server_ip)
+            msg = 'Hint not respected for {}; server_ip={}'.format(query_name, server_ip)
             try:
                 assert False, msg
             except Exception as e:
@@ -501,7 +501,7 @@ def InitializeModel(p,
                 ema_source_t = copy.deepcopy(ema_source_tm1)
                 for key, param in model_weights.items():
                     ema_source_t[key] = tau * ema_source_tm1[key] + (
-                        1.0 - tau) * param
+                            1.0 - tau) * param
             # Assign model_t := source_t.
             model.load_state_dict(ema_source_t)
             print('Initialized from EMA source network: tau={}'.format(tau))
@@ -667,11 +667,11 @@ class BalsaModel(pl.LightningModule):
             loss = (-target_dist * log_probs).sum(-1).mean()
         else:
             if self.loss_type == 'mean_qerror':
-                output_inverted = self.torch_invert_cost(output.reshape(-1,))
-                target_inverted = self.torch_invert_cost(target.reshape(-1,))
+                output_inverted = self.torch_invert_cost(output.reshape(-1, ))
+                target_inverted = self.torch_invert_cost(target.reshape(-1, ))
                 loss = train_utils.QErrorLoss(output_inverted, target_inverted)
             else:
-                loss = F.mse_loss(output.reshape(-1,), target.reshape(-1,))
+                loss = F.mse_loss(output.reshape(-1, ), target.reshape(-1, ))
         if self.l2_lambda > 0:
             l2_loss = torch.tensor(0., device=loss.device, requires_grad=True)
             for param in self.parameters():
@@ -822,7 +822,7 @@ class BalsaAgent(object):
             pl_loggers.TensorBoardLogger(save_dir=os.getcwd(),
                                          version=None,
                                          name='tensorboard_logs'),
-            pl_loggers.WandbLogger(save_dir=os.getcwd(), project='balsa'),
+            pl_loggers.WandbLogger(save_dir=os.getcwd(), project='balsa-hanwen', name=''),
         ]
         self.summary_writer = SummaryWriter()
         self.wandb_logger = self.loggers[-1]
@@ -1092,7 +1092,7 @@ class BalsaAgent(object):
                               map_location=lambda storage, loc: storage)
 
             model.load_state_dict(ckpt)
-            previous_iteration = updateCheckpointAndReadMetadata(p.agent_checkpoint)+1
+            previous_iteration = updateCheckpointAndReadMetadata(p.agent_checkpoint) + 1
             print('Previous already execute {} iters'.format(previous_iteration))
 
             self.model = model.model
@@ -1301,7 +1301,7 @@ class BalsaAgent(object):
         # Thus, it doesn't matter if we use a Dataset referring to the entire
         # data or just the train data.  (Subset.dataset returns the entire
         # original data is where the subset is sampled.)
-        #
+
         # The else branch is for when self.exp_val is not None
         # (p.prev_replay_buffers_glob_val).
         plans_dataset = train_ds.dataset if isinstance(
@@ -1315,14 +1315,14 @@ class BalsaAgent(object):
                 self.curr_value_iter))
         trainer = self._MakeTrainer(train_loader)
         if train_from_scratch:
-            trainer.fit(model, train_loader, val_loader)
+            trainer.fit(model, train_loader, val_loader)  # !!! 在这儿进行训练
         elif not (self.curr_value_iter == 0 and p.skip_training_on_expert and
                   (p.prev_replay_buffers_glob is None or
                    p.agent_checkpoint is not None)):
             # This condition only affects the first ever call to Train().
             # Iteration 0 doesn't have a timeout limit, so during the second
             # call to Train() we would always have self.curr_value_iter == 1.
-            trainer.fit(model, train_loader, val_loader)
+            trainer.fit(model, train_loader, val_loader)  # !!! 在这儿进行训练
             self.model = model.model
             # Optimizer state dict now available.
             self.prev_optimizer_state_dict = None
@@ -1367,7 +1367,7 @@ class BalsaAgent(object):
         assert num_explore_schemes <= 1
         if p.epsilon_greedy:
             assert p.epsilon_greedy_random_transform + \
-                p.epsilon_greedy_random_plan <= 1
+                   p.epsilon_greedy_random_plan <= 1
         if p.epsilon_greedy > 0:
             r = np.random.rand()
             if r < p.epsilon_greedy:
@@ -1915,14 +1915,10 @@ class BalsaAgent(object):
             self.exp.DropAgentExperience()
 
         planner = self._MakePlanner(model, dataset)
-        # Use the model to plan the workload.  Execute the plans and get
-        # latencies.
-        to_execute, execution_results = self.PlanAndExecute(model,
-                                                            planner,
-                                                            is_test=False)
-        # Add execution results to the experience buffer.
-        iter_total_latency, has_timeouts = self.FeedbackExecution(
-            to_execute, execution_results)
+        # Use the model to plan the workload.  Execute the plans and get latencies.
+        to_execute, execution_results = self.PlanAndExecute(model, planner, is_test=False)
+        # Add execution results to the experience buffer.£
+        iter_total_latency, has_timeouts = self.FeedbackExecution(to_execute, execution_results)
         # Logging.
         if not has_timeouts:
             self.overall_best_train_latency = min(
@@ -1947,15 +1943,16 @@ class BalsaAgent(object):
         self.SaveBestPlans(iter)
 
         # Run Conformal Prediction
-        if(p.should_run_cp):
+        if (p.should_run_cp):
             stop_training = self.RunConformalPrediction()
         else:
             stop_training = False
 
         if (self.curr_value_iter + 1) % 5 == 0:
             self.SaveAgent(model, iter_total_latency)
-        # Run and log test queries.
-        self.EvaluateTestSet(model, planner)
+            # Only run evaluation when we finished 5 trainings
+            # Run and log test queries.
+            self.EvaluateTestSet(model, planner)
 
         if p.track_model_moving_averages:
             # Update model averages.
@@ -1990,13 +1987,13 @@ class BalsaAgent(object):
 
         stop_training = False
         best_plans_dir_curr_itr = os.path.join(self.wandb_logger.experiment.dir,
-                                      'best_plans/', str(self.curr_value_iter))
+                                               'best_plans/', str(self.curr_value_iter))
         best_plans_dir_prev_itr = os.path.join(self.wandb_logger.experiment.dir,
-                                      'best_plans/', str(self.curr_value_iter - 1))
+                                               'best_plans/', str(self.curr_value_iter - 1))
 
         latencies_curr_itr = pd.read_csv(os.path.join(best_plans_dir_curr_itr, 'latencies.txt'))
         latencies_prev_itr = pd.read_csv(os.path.join(best_plans_dir_prev_itr, 'latencies.txt'))
-        
+
         error, accuracy, total_latency = cp.calculate_error(latencies_prev_itr, latencies_curr_itr)
         if error <= 1000.0 and accuracy >= 0.9:
             stop_training = True
@@ -2142,8 +2139,8 @@ class BalsaAgent(object):
         p = self.params
         num_iters_done = self.curr_value_iter + 1
         if p.test_query_glob is None or \
-           num_iters_done < p.test_after_n_iters or \
-           num_iters_done % p.test_every_n_iters != 0:
+                num_iters_done < p.test_after_n_iters or \
+                num_iters_done % p.test_every_n_iters != 0:
             return
         if p.test_using_retrained_model:
             print(
@@ -2161,8 +2158,8 @@ class BalsaAgent(object):
         stages = ['train', 'plan', 'wait_for_executions']
         num_iters_done = self.curr_value_iter + 1
         if p.test_query_glob is not None and \
-           num_iters_done >= p.test_after_n_iters and \
-           num_iters_done % p.test_every_n_iters == 0:
+                num_iters_done >= p.test_after_n_iters and \
+                num_iters_done % p.test_every_n_iters == 0:
             stages += ['plan_test_set', 'wait_for_executions_test_set']
         timings = [self.timer.GetLatestTiming(s) for s in stages]
         iter_total_s = sum(timings)
@@ -2208,15 +2205,15 @@ class BalsaAgent(object):
             self.test_nodes = plans_lib.FilterScansOrJoins(self.test_nodes)
 
         while self.curr_value_iter < p.val_iters:
-            has_timeouts, stop_training = self.RunOneIter(self.curr_value_iter)
+            has_timeouts, stop_training = self.RunOneIter(self.curr_value_iter)  # 在这儿运行 Run
 
             self.LogTimings()
 
-            if stop_training:
+            if stop_training:  # 目前没用
                 print("Conformal prediction made the decision to stop training")
                 break
 
-            if (p.early_stop_on_skip_fraction is not None and
+            if (p.early_stop_on_skip_fraction is not None and  # 目前没用
                     self.curr_iter_skipped_queries >=
                     p.early_stop_on_skip_fraction * len(self.train_nodes)):
                 break
@@ -2256,22 +2253,57 @@ def Main(argv):
 
     p.use_local_execution = FLAGS.local
     # Override params here for quick debugging.
-    # p.sim_checkpoint = None
-    # p.epochs = 1
+    p.sim_checkpoint = None
+    p.epochs = 1
     # p.should_run_cp = False
-    p.val_iters = 500
-    p.query_glob = ['*.sql']
-    p.test_query_glob = ['1d.sql', '1b.sql', '2c.sql', '2a.sql', '3a.sql', '4b.sql', '5a.sql',
- '6b.sql', '6a.sql', '6c.sql', '7a.sql', '8a.sql', '8b.sql', '9d.sql',
- '9a.sql', '10c.sql', '11d.sql', '11a.sql', '12b.sql', '13d.sql', '13c.sql',
- '14a.sql', '15c.sql', '15b.sql', '16a.sql', '16c.sql', '17e.sql', '17b.sql',
- '17f.sql', '18c.sql', '19a.sql', '19b.sql', '20a.sql', '21c.sql', '22d.sql',
- '22a.sql', '23a.sql', '24a.sql', '25a.sql', '26a.sql', '27a.sql', '28a.sql',
- '29a.sql', '30b.sql', '31b.sql', '32b.sql', '33a.sql']
-
     # p.search_until_n_complete_plans = 1
+    p.val_iters = 3
+    p.query_glob = ['*.sql']
+    # p.test_query_glob = ['1d.sql', '1b.sql', '2c.sql', '2a.sql', '3a.sql', '4b.sql', '5a.sql',
+    #                      '6b.sql', '6a.sql', '6c.sql', '7a.sql', '8a.sql', '8b.sql', '9d.sql',
+    #                      '9a.sql', '10c.sql', '11d.sql', '11a.sql', '12b.sql', '13d.sql', '13c.sql',
+    #                      '14a.sql', '15c.sql', '15b.sql', '16a.sql', '16c.sql', '17e.sql', '17b.sql',
+    #                      '17f.sql', '18c.sql', '19a.sql', '19b.sql', '20a.sql', '21c.sql', '22d.sql',
+    #                      '22a.sql', '23a.sql', '24a.sql', '25a.sql', '26a.sql', '27a.sql', '28a.sql',
+    #                      '29a.sql', '30b.sql', '31b.sql', '32b.sql', '33a.sql']
+
     # p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20240923_220508-n3wgo5so/files/checkpoint.pt"
     # p.eval_mode = True
+
+    # p.query_dir = "queries/join-order-benchmark-extended"
+    # p.test_query_glob = ['10b.sql', '10c.sql', '11b.sql', '11c.sql', '11d.sql', '12b.sql', '12c.sql', '13b.sql',
+    #                      '13c.sql', '13d.sql', '14b.sql', '14c.sql', '15b.sql', '15c.sql', '15d.sql', '16b.sql',
+    #                      '16c.sql', '16d.sql', '17b.sql', '17c.sql', '17d.sql', '17e.sql', '17f.sql', '18b.sql',
+    #                      '18c.sql', '19b.sql', '19c.sql', '19d.sql', '1b.sql', '1c.sql', '1d.sql', '20b.sql', '20c.sql',
+    #                      '21b.sql', '21c.sql', '22b.sql', '22c.sql', '22d.sql', '23b.sql', '23c.sql', '24b.sql',
+    #                      '25b.sql', '25c.sql', '26b.sql', '26c.sql', '27b.sql', '27c.sql', '28b.sql', '28c.sql',
+    #                      '29b.sql', '29c.sql', '2b.sql', '2c.sql', '2d.sql', '30b.sql', '30c.sql', '31b.sql', '31c.sql',
+    #                      '32b.sql', '33b.sql', '33c.sql', '3b.sql', '3c.sql', '4b.sql', '4c.sql', '5b.sql', '5c.sql',
+    #                      '6b.sql', '6c.sql', '6d.sql', '6e.sql', '6f.sql', '7b.sql', '7c.sql', '8b.sql', '8c.sql',
+    #                      '8d.sql', '9b.sql', '9c.sql', '9d.sql', 'e10b.sql', 'e11b.sql', 'e12b.sql', 'e1b.sql',
+    #                      'e2b.sql', 'e3b.sql', 'e4b.sql', 'e5b.sql', 'e6b.sql', 'e7b.sql', 'e8b.sql', 'e9b.sql']
+
+    p.test_query_glob = ['10b.sql', '10c.sql', '11b.sql', '11c.sql', '11d.sql', '12b.sql', '12c.sql', '13b.sql',
+                         '13c.sql', '13d.sql', '14b.sql', '14c.sql', '15b.sql', '15c.sql', '15d.sql', '16b.sql',
+                         '16c.sql', '16d.sql', '17b.sql', '17c.sql', '17d.sql', '17e.sql', '17f.sql', '18b.sql',
+                         '18c.sql', '19b.sql', '19c.sql', '19d.sql', '1b.sql', '1c.sql', '1d.sql', '20b.sql', '20c.sql',
+                         '21b.sql', '21c.sql', '22b.sql', '22c.sql', '22d.sql', '23b.sql', '23c.sql', '24b.sql',
+                         '25b.sql', '25c.sql', '26b.sql', '26c.sql', '27b.sql', '27c.sql', '28b.sql', '28c.sql',
+                         '29b.sql', '29c.sql', '2b.sql', '2c.sql', '2d.sql', '30b.sql', '30c.sql', '31b.sql', '31c.sql',
+                         '32b.sql', '33b.sql', '33c.sql', '3b.sql', '3c.sql', '4b.sql', '4c.sql', '5b.sql', '5c.sql',
+                         '6b.sql', '6c.sql', '6d.sql', '6e.sql', '6f.sql', '7b.sql', '7c.sql', '8b.sql', '8c.sql',
+                         '8d.sql', '9b.sql', '9c.sql', '9d.sql']
+
+    # p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20240923_220508-n3wgo5so/files/checkpoint.pt"
+    p.query_dir = "queries/join-order-benchmark-hanwen-test"
+    p.query_glob = ['*.sql']
+    p.test_query_glob = ['3b.sql']
+    p.eval_mode = False
+
+    # p.query_glob = ['1a.sql', '1b.sql']
+    # p.test_query_glob  = ['1a.sql']
+    print("p.dir: ", p.query_dir)
+    print(len(p.query_glob), len(p.test_query_glob))
 
     agent = BalsaAgent(p)
     agent.Run()
