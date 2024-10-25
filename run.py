@@ -59,8 +59,7 @@ from balsa import envs
 from balsa import execution
 from balsa import plan_analysis
 from balsa.experience import Experience
-from balsa.models.transformer import ReportModel
-from balsa.models.transformer import Transformer
+from balsa.models.transformer import Transformer, ReportModel
 from balsa.models.transformer import TransformerV2
 from balsa.models.treeconv import TreeConvolution
 from balsa.util import dataset as ds
@@ -76,7 +75,7 @@ flags.DEFINE_boolean('local', False,
 
 def updateCheckpointAndReadMetadata(pt_path):
     # Step 1: 修改文件路径，将 'checkpoint.pt' 替换为 'checkpoint-metadata.txt'
-    metadata_file = pt_path.replace("checkpoint.pt", "checkpoint-metadata.txt")
+    metadata_file = pt_path.replace("checkpoint_199.pt", "checkpoint-metadata.txt")
 
     # Step 2: 读取文件，提取 'value_iter' 后面的数值
     if os.path.exists(metadata_file):
@@ -348,7 +347,7 @@ def ParseExecutionResult(result_tup,
                 'cheapest' if p_latency == min_p_latency else '',
                 '[expert plan]'
                 if found_hint_str_physical == expert_hint_str_physical else '',
-                '[picked]' if found_hint_str_physical == hint_str else ''
+                '[picked!]' if found_hint_str_physical == hint_str else ''
             ]
             extras = ' '.join(filter(lambda s: s, extras)).strip()
             if extras:
@@ -1098,8 +1097,8 @@ class BalsaAgent(object):
             self.model = model.model
             print('Loaded value network checkpoint at iter',
                   self.curr_value_iter)
-        if self.curr_value_iter == 0:
-            ReportModel(model)
+        # if self.curr_value_iter == 0:
+        #     ReportModel(model)
         return model
 
     def _MakeTrainer(self, train_loader):
@@ -1516,7 +1515,6 @@ class BalsaAgent(object):
             # Launch tasks.
             if is_test:
                 curr_timeout = None
-
                 # Roughly 18 mins.  Good enough to cover disk filled error.
                 curr_timeout = 1100000
             else:
@@ -1693,7 +1691,10 @@ class BalsaAgent(object):
         # expert plans for train queries).
         agent_plans_diffs = []
         expert_plans_diffs = []
-        for node, result_tup, to_execute_tup in zip(self.train_nodes,
+        # Hanwen: Add target_node here
+        hanwen_target_nodes = self.train_nodes if not p.eval_mode else self.test_nodes
+        # for node, result_tup, to_execute_tup in zip(self.train_nodes,
+        for node, result_tup, to_execute_tup in zip(hanwen_target_nodes,
                                                     execution_results,
                                                     to_execute):
             result, real_cost, server_ip = result_tup
@@ -1915,31 +1916,35 @@ class BalsaAgent(object):
             self.exp.DropAgentExperience()
 
         planner = self._MakePlanner(model, dataset)
-        # Use the model to plan the workload.  Execute the plans and get latencies.
-        to_execute, execution_results = self.PlanAndExecute(model, planner, is_test=False)
-        # Add execution results to the experience buffer.£
-        iter_total_latency, has_timeouts = self.FeedbackExecution(to_execute, execution_results)
+        # Hanwen: If p.eval, we do not need to go here.
+        if not p.eval_mode:
+            # Use the model to plan the workload.  Execute the plans and get latencies.
+            to_execute, execution_results = self.PlanAndExecute(model, planner, is_test=False)
+            # Add execution results to the experience buffer.£
+            iter_total_latency, has_timeouts = self.FeedbackExecution(to_execute, execution_results)
         # Logging.
-        if not has_timeouts:
-            self.overall_best_train_latency = min(
-                self.overall_best_train_latency, iter_total_latency / 1e3)
-            to_log = [
-                ('latency/workload', iter_total_latency / 1e3,
-                 self.curr_value_iter),
-                ('latency/workload_best', self.overall_best_train_latency,
-                 self.curr_value_iter),
-                ('num_query_execs', self.num_query_execs, self.curr_value_iter),
-                ('num_queries_with_eps_random', planner.num_queries_with_random,
-                 self.curr_value_iter),
-                ('curr_iter_skipped_queries', self.curr_iter_skipped_queries,
-                 self.curr_value_iter),
-                ('curr_value_iter', self.curr_value_iter, self.curr_value_iter),
-                ('lr', model.learning_rate, self.curr_value_iter),
-            ]
-            if p.reduce_lr_within_val_iter:
-                to_log.append(('iter_final_lr', model.latest_per_iter_lr,
-                               self.curr_value_iter))
-            self.LogScalars(to_log)
+
+        # Hanwen: Comment this
+        # if not has_timeouts:
+        #     self.overall_best_train_latency = min(
+        #         self.overall_best_train_latency, iter_total_latency / 1e3)
+        #     to_log = [
+        #         ('latency/workload', iter_total_latency / 1e3,
+        #          self.curr_value_iter),
+        #         ('latency/workload_best', self.overall_best_train_latency,
+        #          self.curr_value_iter),
+        #         ('num_query_execs', self.num_query_execs, self.curr_value_iter),
+        #         ('num_queries_with_eps_random', planner.num_queries_with_random,
+        #          self.curr_value_iter),
+        #         ('curr_iter_skipped_queries', self.curr_iter_skipped_queries,
+        #          self.curr_value_iter),
+        #         ('curr_value_iter', self.curr_value_iter, self.curr_value_iter),
+        #         ('lr', model.learning_rate, self.curr_value_iter),
+        #     ]
+        #     if p.reduce_lr_within_val_iter:
+        #         to_log.append(('iter_final_lr', model.latest_per_iter_lr,
+        #                        self.curr_value_iter))
+        #     self.LogScalars(to_log)
         self.SaveBestPlans(iter)
 
         # Run Conformal Prediction
@@ -1950,8 +1955,10 @@ class BalsaAgent(object):
 
         if (self.curr_value_iter + 1) % 5 == 0:
             self.SaveAgent(model, iter_total_latency)
-            # Only run evaluation when we finished 5 trainings
-            # Run and log test queries.
+            self.EvaluateTestSet(model, planner)
+
+        if p.eval_mode:
+            assert (p.val_iters == 1)
             self.EvaluateTestSet(model, planner)
 
         if p.track_model_moving_averages:
@@ -1978,7 +1985,7 @@ class BalsaAgent(object):
                     planner.SetModel(model)
                     self.EvaluateTestSet(model, planner, tag='latency_test_swa')
                     self.SwapMovingAverage(model, moving_average='swa')
-
+        if p.eval_mode: has_timeouts = False
         return has_timeouts, stop_training
 
     def RunConformalPrediction(self):
@@ -2207,7 +2214,7 @@ class BalsaAgent(object):
         while self.curr_value_iter < p.val_iters:
             has_timeouts, stop_training = self.RunOneIter(self.curr_value_iter)  # 在这儿运行 Run
 
-            self.LogTimings()
+            # self.LogTimings()
 
             if stop_training:  # 目前没用
                 print("Conformal prediction made the decision to stop training")
@@ -2257,7 +2264,7 @@ def Main(argv):
     p.epochs = 1
     # p.should_run_cp = False
     # p.search_until_n_complete_plans = 1
-    p.val_iters = 3
+    p.val_iters = 1
     p.query_glob = ['*.sql']
     # p.test_query_glob = ['1d.sql', '1b.sql', '2c.sql', '2a.sql', '3a.sql', '4b.sql', '5a.sql',
     #                      '6b.sql', '6a.sql', '6c.sql', '7a.sql', '8a.sql', '8b.sql', '9d.sql',
@@ -2294,14 +2301,13 @@ def Main(argv):
                          '6b.sql', '6c.sql', '6d.sql', '6e.sql', '6f.sql', '7b.sql', '7c.sql', '8b.sql', '8c.sql',
                          '8d.sql', '9b.sql', '9c.sql', '9d.sql']
 
-    # p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20240923_220508-n3wgo5so/files/checkpoint.pt"
-    p.query_dir = "queries/join-order-benchmark-hanwen-test"
-    p.query_glob = ['*.sql']
-    p.test_query_glob = ['3b.sql']
-    p.eval_mode = False
+    p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20241024_024624-f4xmgfob/files/checkpoint_199.pt"
+    # p.query_dir = "queries/join-order-benchmark-hanwen-test"
+    # p.query_glob = ['*.sql']
+    p.test_query_glob = ['1b.sql']
+    p.eval_mode = True
+    p.sim = False
 
-    # p.query_glob = ['1a.sql', '1b.sql']
-    # p.test_query_glob  = ['1a.sql']
     print("p.dir: ", p.query_dir)
     print(len(p.query_glob), len(p.test_query_glob))
 

@@ -47,7 +47,7 @@ class Workload(object):
         p.Define('query_dir', None, 'Directory to workload queries.')
         p.Define(
             'query_glob', '*.sql',
-            'If supplied, glob for this pattern.  Otherwise, use all queries.'\
+            'If supplied, glob for this pattern.  Otherwise, use all queries.' \
             '  Example: 29*.sql.'
         )
         p.Define(
@@ -56,14 +56,16 @@ class Workload(object):
             'Desirable for evaluation.')
         p.Define(
             'test_query_glob', None,
-            'Similar usage as query_glob. If None, treating all queries'\
+            'Similar usage as query_glob. If None, treating all queries' \
             ' as training nodes.'
         )
         p.Define('search_space_join_ops',
                  ['Hash Join', 'Merge Join', 'Nested Loop'],
+                 # ['Hash Join', 'Nested Loop'],
                  'Join operators to learn.')
         p.Define('search_space_scan_ops',
                  ['Index Scan', 'Index Only Scan', 'Seq Scan'],
+                 # ['Index Scan', 'Seq Scan'],
                  'Scan operators to learn.')
         return p
 

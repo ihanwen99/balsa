@@ -14,6 +14,7 @@
 
 import collections
 import time
+from collections import defaultdict
 
 import numpy as np
 import torch
@@ -120,7 +121,7 @@ class Optimizer(object):
             use_label_cache=True,
             use_plan_restrictions=True,
             # Inject the selection boolean here
-            cp_assist=False,
+            cp_assist=True,
     ):
         self.workload_info = workload_info
         self.plan_featurizer = plan_featurizer
@@ -132,6 +133,11 @@ class Optimizer(object):
         self.cp_assist = cp_assist
 
         print("CP Assist LQO: ", self.cp_assist)
+        print("CP Assist LQO: ", self.cp_assist)
+        print("CP Assist LQO: ", self.cp_assist)
+        print("CP Assist LQO: ", self.cp_assist)
+        print("CP Assist LQO: ", self.cp_assist)
+
         # Plan search params
         if not plan_physical:
             jts = workload_info.join_types
@@ -371,8 +377,13 @@ class Optimizer(object):
                                   right,
                                   planner_config=None,
                                   avoid_eq_filters=False):
-        join_ops = self.workload_info.join_types
-        scan_ops = self.workload_info.scan_types
+        # join_ops = self.workload_info.join_types
+        # scan_ops = self.workload_info.scan_types
+        # # Hanwen: Directly Change here -> Not Valid
+        join_ops = ['Hash Join', 'Nested Loop']
+        scan_ops = ['Index Scan', 'Seq Scan']
+        # print("optimizer.py: join_ops: ", join_ops)
+        # print("optimizer.py: scan_ops: ", scan_ops)
         if planner_config:
             join_ops = planner_config.KeepEnabledJoinOps(join_ops)
         # Hack.
@@ -545,17 +556,30 @@ class Optimizer(object):
 
             # Will get this from Shashank
             cp_hashmap = {
-
+                "(NL,NL,SS)": 1480.14,
+                "(NL,HJ,IS)": 1632.19,
+                "(HJ,NL,SS)": 1375,
+                "(NL,NL,SS)": 1514,
+                "(HJ,SS,SS)": 1331.63,
+                "(HJ,SS,IS)": 3975.14
             }
 
             short = {
+                "Nested Loop": "NL",
                 "Hash Join": "HJ",
+                "Seq Scan": "SS",
+                "Index Scan": "IS"
             }
+
+            shown_counter = defaultdict(int)
+            non_shown_counter = defaultdict(int)
 
             # Given one state, return the related Quantile
             def extract_substructure(state):
                 parent_node = state[0].node_type  # Hash Join
-                print("parent_node: ", parent_node)
+                # print("parent_node: ", parent_node)
+                if not state[0].children:
+                    return "None"
                 left_child = state[0].children[0].node_type  # Nested Loop
                 right_child = state[0].children[1].node_type  # Merge Join
                 return "({},{},{})".format(short[parent_node], short[left_child], short[right_child])
@@ -564,22 +588,40 @@ class Optimizer(object):
                 # 1. Extract substructure based on state
                 substructure = extract_substructure(state)
                 # 2. Fetch the related quantile -> C
-                quantile_c = cp_hashmap[substructure]
+                if substructure in cp_hashmap:
+                    quantile_c = cp_hashmap[substructure]
+                else:
+                    # print("non-shown substructure: ", substructure)
+                    non_shown_counter[substructure] += 1
+                    quantile_c = 100000
                 # 3. Return the upperbound
                 return cost + quantile_c
+
+            # Hanwen: Just to see the running condition in the following else branch - Baseline
+            def substructure_stats(cost, state):
+                substructure = extract_substructure(state)
+                if substructure in cp_hashmap:
+                    shown_counter[substructure] += 1
+                else:
+                    non_shown_counter[substructure] += 1
+                return cost
 
             if self.cp_assist:  # !!! Will inject the CP here
                 fringe = sorted(fringe, key=lambda x: cp_guaranteed_upperbound(x[0], x[1]))
             else:  # Baseline
-                fringe = sorted(fringe, key=lambda x: x[0])
+                fringe = sorted(fringe, key=lambda x: substructure_stats(x[0], x[1]))
+
             fringe = fringe[:beam_size]
 
         ### From here to process the terminal_state
-        print("len(terminal_states):", len(terminal_states))
+        # print("len(terminal_states):", len(terminal_states))
 
         # for terminal_state in terminal_states:
-        print(terminal_states)
-        print()
+        # print(terminal_states)
+        # print()
+
+        print("shown_counter: ", shown_counter)
+        print("non_shown_counter: ", non_shown_counter)
 
         planning_time = (time.time() - planning_start_t) * 1e3
         print('Planning took {:.1f}ms'.format(planning_time))

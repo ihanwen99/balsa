@@ -93,6 +93,7 @@ class BalsaParams(object):
         p.Define('bushy', True, 'Plans bushy query execution plans.')
         p.Define('search_space_join_ops',
                  ['Hash Join', 'Merge Join', 'Nested Loop'],
+                 # ['Hash Join', 'Nested Loop'],
                  'Action space: join operators to learn and use.')
         p.Define('search_space_scan_ops',
                  ['Index Scan', 'Index Only Scan', 'Seq Scan'],

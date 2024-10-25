@@ -55,6 +55,9 @@ class PerQueryTimeoutController(object):
             # This query timed out.
             self.curr_iter_has_timeouts = True
         else:
+            if self.curr_iter_max_ms == None: self.curr_iter_max_ms = 0
+            if self.curr_iter_ms == None: self.curr_iter_ms = 0
+            # Hanwen: Only for correct run, because right now we do not init max_ms with p.eval
             # This query finished within timeout.
             self.curr_iter_ms += latency_ms
             self.curr_iter_max_ms = max(self.curr_iter_max_ms, latency_ms)

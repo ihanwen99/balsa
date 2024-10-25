@@ -16,7 +16,6 @@
 import collections
 import time
 
-import numpy as np
 import torch
 
 
@@ -38,7 +37,7 @@ def LoadBestCheckpointForEval(model, trainer):
             best_epoch = best_epoch.split('_v')[0]
         best_epoch = int(best_epoch)
     else:
-        print('No best checkpoint found (run validaiton yet?); '\
+        print('No best checkpoint found (run validaiton yet?); ' \
               'model left unchanged.')
 
 
@@ -106,7 +105,7 @@ class ExponentialDecay(Schedule):
         return self.GetStep(self.curr_step)
 
     def GetStep(self, step):
-        return self.init_value * self.decay_rate**(step / self.decay_steps)
+        return self.init_value * self.decay_rate ** (step / self.decay_steps)
 
     def Step(self):
         self.curr_step += 1
@@ -158,7 +157,7 @@ class Piecewise(Schedule):
         if self.final_decay_rate:
             t = self.curr_step - self.last_stage_start_t
             lr_start = self.schedule_values[-1][1]
-            return lr_start * (self.final_decay_rate**t)
+            return lr_start * (self.final_decay_rate ** t)
         return r
 
     def Step(self):
@@ -213,7 +212,7 @@ class AdaptiveMetricPiecewiseDecayToZero(AdaptiveMetricPiecewise):
         lr_start = self.schedule_values[-1][1]
 
         if self.final_decay_rate is not None:
-            return lr_start * (self.final_decay_rate**t)
+            return lr_start * (self.final_decay_rate ** t)
 
         return lr_start * (1 - t / T)
 
@@ -235,8 +234,7 @@ class Timer(object):
     def Stop(self, stage):
         assert self.curr_stage == stage, 'curr_stage={} != {}'.format(
             self.curr_stage, stage)
-        self.stage_timing_dict[stage].append(time.time() -
-                                             self.curr_stage_start)
+        self.stage_timing_dict[stage].append(time.time() - self.curr_stage_start)
         self.curr_stage = None
 
     def GetLatestTiming(self, stage):

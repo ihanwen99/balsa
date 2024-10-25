@@ -19,8 +19,8 @@ import subprocess
 
 import pandas as pd
 
-from balsa.util import plans_lib
 import pg_executor
+from balsa.util import plans_lib
 
 
 def GetServerVersion():
@@ -330,7 +330,8 @@ def EstimateFilterRows(nodes):
                     json_dict = cursor.fetchall()[0][0][0]
                     num_rows = json_dict['Plan']['Plan Rows']
                     cache[key] = num_rows
-    print('{} unique filters'.format(len(cache)))
+    # print('{} unique filters'.format(len(cache)))
+    print('[codecs.py/334]: Temp Skip Printing Here')
     pprint.pprint(cache)
     for node in nodes:
         d = {}
