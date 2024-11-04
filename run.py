@@ -40,6 +40,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
+import wandb
 from absl import app
 from absl import flags
 from pytorch_lightning import loggers as pl_loggers
@@ -53,7 +54,6 @@ import experiments  # noqa # pylint: disable=unused-import
 import pg_executor
 import sim as sim_lib
 import train_utils
-import wandb
 from balsa import costing
 from balsa import envs
 from balsa import execution
@@ -2212,15 +2212,9 @@ class BalsaAgent(object):
             self.test_nodes = plans_lib.FilterScansOrJoins(self.test_nodes)
 
         while self.curr_value_iter < p.val_iters:
-            has_timeouts, stop_training = self.RunOneIter(self.curr_value_iter)  # 在这儿运行 Run
+            has_timeouts, stop_training = self.RunOneIter(self.curr_value_iter)
 
-            # self.LogTimings()
-
-            if stop_training:  # 目前没用
-                print("Conformal prediction made the decision to stop training")
-                break
-
-            if (p.early_stop_on_skip_fraction is not None and  # 目前没用
+            if (p.early_stop_on_skip_fraction is not None and
                     self.curr_iter_skipped_queries >=
                     p.early_stop_on_skip_fraction * len(self.train_nodes)):
                 break
