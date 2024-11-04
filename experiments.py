@@ -329,6 +329,7 @@ class BalsaParams(object):
                  ' cluster?  Non-execution EXPLAINs are always issued to' \
                  ' local.')
         p.Define('use_cache', True, 'Skip executing seen plans?')
+        p.Define('cp_guided', default_value=False, description="Activate CP Guided Plan Search")
         return p
 
 

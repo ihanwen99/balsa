@@ -73,7 +73,7 @@ flags.DEFINE_boolean('local', False,
                      'Whether to use local engine for query execution.')
 
 
-def updateCheckpointAndReadMetadata(pt_path):
+def read_metadata(pt_path):
     metadata_file = pt_path.replace("checkpoint_49.pt", "checkpoint-metadata.txt")
 
     if os.path.exists(metadata_file):
@@ -83,9 +83,9 @@ def updateCheckpointAndReadMetadata(pt_path):
                 previous_iteration = int(content.split(",")[1].strip())
                 return previous_iteration
             else:
-                raise ValueError("文件内容格式不正确，应该以 'value_iter,' 开头")
+                raise ValueError("Error")
     else:
-        raise FileNotFoundError(f"文件 {metadata_file} 不存在")
+        raise FileNotFoundError(f"File {metadata_file} Not Exists")
 
 
 def GetDevice():
@@ -251,7 +251,7 @@ def ParseExecutionResult(result_tup,
                          curr_timeout_ms=None,
                          found_plans=None,
                          predicted_costs=None,
-                         silent=False,
+                         silent=True,
                          is_test=False,
                          use_local_execution=True,
                          plan_physical=True,
@@ -1088,7 +1088,7 @@ class BalsaAgent(object):
                               map_location=lambda storage, loc: storage)
 
             model.load_state_dict(ckpt)
-            previous_iteration = updateCheckpointAndReadMetadata(p.agent_checkpoint) + 1
+            previous_iteration = read_metadata(p.agent_checkpoint) + 1
             print('Previous already execute {} iters'.format(previous_iteration))
 
             self.model = model.model
@@ -1247,7 +1247,7 @@ class BalsaAgent(object):
         Save(self.workload, './data/initial_policy_data.pkl')
         self.LogExpertExperience(self.train_nodes, self.test_nodes)
 
-    def HanwenLoadModel(self, train_from_scratch=False):
+    def eval_load_model(self, train_from_scratch=False):
         p = self.params
         train_ds, train_loader, _, val_loader = self._MakeDatasetAndLoader(
             log=not train_from_scratch)
@@ -1276,7 +1276,7 @@ class BalsaAgent(object):
 
         ckpt = torch.load(p.agent_checkpoint, map_location=lambda storage, loc: storage)
         model.load_state_dict(ckpt)
-        previous_iteration = updateCheckpointAndReadMetadata(p.agent_checkpoint) + 1
+        previous_iteration = read_metadata(p.agent_checkpoint) + 1
         print('Previous already execute {} iters'.format(previous_iteration))
 
         self.model = model.model
@@ -1688,10 +1688,9 @@ class BalsaAgent(object):
         # expert plans for train queries).
         agent_plans_diffs = []
         expert_plans_diffs = []
-        # Hanwen: Add target_node here
-        hanwen_target_nodes = self.train_nodes if not p.eval_mode else self.test_nodes
-        # for node, result_tup, to_execute_tup in zip(self.train_nodes,
-        for node, result_tup, to_execute_tup in zip(hanwen_target_nodes,
+        # Fix Bug
+        new_target_nodes = self.train_nodes if not p.eval_mode else self.test_nodes
+        for node, result_tup, to_execute_tup in zip(new_target_nodes,
                                                     execution_results,
                                                     to_execute):
             result, real_cost, server_ip = result_tup
@@ -1897,23 +1896,27 @@ class BalsaAgent(object):
             p.beam,
             search_until_n_complete_plans=p.search_until_n_complete_plans,
             plan_physical=p.plan_physical,
-            use_plan_restrictions=p.real_use_plan_restrictions)
+            use_plan_restrictions=p.real_use_plan_restrictions,
+            cp_assist=p.cp_guided
+        )
 
     def RunOneIter(self, iter):
         p = self.params
         self.curr_iter_skipped_queries = 0
-        # Train the model.
-        # Hanwen want to make it support evaluate only
+
         if p.eval_mode:
-            model, dataset = self.HanwenLoadModel()
+            # Evaluation Only
+            model, dataset = self.eval_load_model()
         else:
+            # Train the model.
             model, dataset = self.Train()
+
         # Replay buffer reset (if enabled).
         if self.curr_value_iter == p.replay_buffer_reset_at_iter:
             self.exp.DropAgentExperience()
 
         planner = self._MakePlanner(model, dataset)
-        # Hanwen: If p.eval, we do not need to go here.
+        # If Evaluation Mode, we do not need to go here.
         if not p.eval_mode:
             # Use the model to plan the workload.  Execute the plans and get latencies.
             to_execute, execution_results = self.PlanAndExecute(model, planner, is_test=False)
@@ -1921,7 +1924,7 @@ class BalsaAgent(object):
             iter_total_latency, has_timeouts = self.FeedbackExecution(to_execute, execution_results)
         # Logging.
 
-        # Hanwen: Comment this
+        # Comment
         # if not has_timeouts:
         #     self.overall_best_train_latency = min(
         #         self.overall_best_train_latency, iter_total_latency / 1e3)
@@ -2254,39 +2257,11 @@ def Main(argv):
     name = FLAGS.run
     print('Looking up params by name:', name)
     p = balsa.params_registry.Get(name)
-
     p.use_local_execution = FLAGS.local
-    # Override params here for quick debugging.
     p.sim_checkpoint = None
     p.epochs = 1
-    # p.should_run_cp = False
-    # p.search_until_n_complete_plans = 1
     p.val_iters = 1
     p.query_glob = ['*.sql']
-    # p.test_query_glob = ['1d.sql', '1b.sql', '2c.sql', '2a.sql', '3a.sql', '4b.sql', '5a.sql',
-    #                      '6b.sql', '6a.sql', '6c.sql', '7a.sql', '8a.sql', '8b.sql', '9d.sql',
-    #                      '9a.sql', '10c.sql', '11d.sql', '11a.sql', '12b.sql', '13d.sql', '13c.sql',
-    #                      '14a.sql', '15c.sql', '15b.sql', '16a.sql', '16c.sql', '17e.sql', '17b.sql',
-    #                      '17f.sql', '18c.sql', '19a.sql', '19b.sql', '20a.sql', '21c.sql', '22d.sql',
-    #                      '22a.sql', '23a.sql', '24a.sql', '25a.sql', '26a.sql', '27a.sql', '28a.sql',
-    #                      '29a.sql', '30b.sql', '31b.sql', '32b.sql', '33a.sql']
-
-    # p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20240923_220508-n3wgo5so/files/checkpoint.pt"
-    # p.eval_mode = True
-
-    # p.query_dir = "queries/join-order-benchmark-extended"
-    # p.test_query_glob = ['10b.sql', '10c.sql', '11b.sql', '11c.sql', '11d.sql', '12b.sql', '12c.sql', '13b.sql',
-    #                      '13c.sql', '13d.sql', '14b.sql', '14c.sql', '15b.sql', '15c.sql', '15d.sql', '16b.sql',
-    #                      '16c.sql', '16d.sql', '17b.sql', '17c.sql', '17d.sql', '17e.sql', '17f.sql', '18b.sql',
-    #                      '18c.sql', '19b.sql', '19c.sql', '19d.sql', '1b.sql', '1c.sql', '1d.sql', '20b.sql', '20c.sql',
-    #                      '21b.sql', '21c.sql', '22b.sql', '22c.sql', '22d.sql', '23b.sql', '23c.sql', '24b.sql',
-    #                      '25b.sql', '25c.sql', '26b.sql', '26c.sql', '27b.sql', '27c.sql', '28b.sql', '28c.sql',
-    #                      '29b.sql', '29c.sql', '2b.sql', '2c.sql', '2d.sql', '30b.sql', '30c.sql', '31b.sql', '31c.sql',
-    #                      '32b.sql', '33b.sql', '33c.sql', '3b.sql', '3c.sql', '4b.sql', '4c.sql', '5b.sql', '5c.sql',
-    #                      '6b.sql', '6c.sql', '6d.sql', '6e.sql', '6f.sql', '7b.sql', '7c.sql', '8b.sql', '8c.sql',
-    #                      '8d.sql', '9b.sql', '9c.sql', '9d.sql', 'e10b.sql', 'e11b.sql', 'e12b.sql', 'e1b.sql',
-    #                      'e2b.sql', 'e3b.sql', 'e4b.sql', 'e5b.sql', 'e6b.sql', 'e7b.sql', 'e8b.sql', 'e9b.sql']
-
     p.test_query_glob = ['10b.sql', '10c.sql', '11b.sql', '11c.sql', '11d.sql', '12b.sql', '12c.sql', '13b.sql',
                          '13c.sql', '13d.sql', '14b.sql', '14c.sql', '15b.sql', '15c.sql', '15d.sql', '16b.sql',
                          '16c.sql', '16d.sql', '17b.sql', '17c.sql', '17d.sql', '17e.sql', '17f.sql', '18b.sql',
@@ -2297,13 +2272,12 @@ def Main(argv):
                          '32b.sql', '33b.sql', '33c.sql', '3b.sql', '3c.sql', '4b.sql', '4c.sql', '5b.sql', '5c.sql',
                          '6b.sql', '6c.sql', '6d.sql', '6e.sql', '6f.sql', '7b.sql', '7c.sql', '8b.sql', '8c.sql',
                          '8d.sql', '9b.sql', '9c.sql', '9d.sql']
+    p.test_query_glob = ['5b.sql']
 
-    p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20241024_024624-f4xmgfob/files/checkpoint_49.pt"
-    # p.query_dir = "queries/join-order-benchmark-hanwen-test"
-    # p.query_glob = ['*.sql']
-    p.test_query_glob = ['1b.sql']
+    p.agent_checkpoint = "train-checkpoints/checkpoint_49.pt"
     p.eval_mode = True
     p.sim = False
+    p.cp_guided = False
 
     print("p.dir: ", p.query_dir)
     print(len(p.query_glob), len(p.test_query_glob))
