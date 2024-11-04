@@ -121,7 +121,7 @@ class Optimizer(object):
             use_label_cache=True,
             use_plan_restrictions=True,
             # Inject the selection boolean here
-            cp_assist=True,
+            cp_assist=False,
     ):
         self.workload_info = workload_info
         self.plan_featurizer = plan_featurizer
@@ -258,9 +258,11 @@ class Optimizer(object):
 
     def plan(self, query_node, search_method, **kwargs):
         if search_method == 'beam_bk':
-            return self._beam_search_bk(query_node,
-                                        beam_size=self.beam_size,
-                                        **kwargs)
+            if not self.cp_assist:
+                return self._beam_search_bk(query_node, beam_size=self.beam_size, **kwargs)
+            else:
+                return self._beam_search_bk_cp(query_node, beam_size=self.beam_size, **kwargs)
+
         raise ValueError(f'Unsupported search_method: {search_method}')
 
     def _get_possible_plans(self,
@@ -379,7 +381,6 @@ class Optimizer(object):
                                   avoid_eq_filters=False):
         # join_ops = self.workload_info.join_types
         # scan_ops = self.workload_info.scan_types
-        # # Hanwen: Directly Change here -> Not Valid
         join_ops = ['Hash Join', 'Nested Loop']
         scan_ops = ['Index Scan', 'Seq Scan']
         # print("optimizer.py: join_ops: ", join_ops)
@@ -533,37 +534,6 @@ class Optimizer(object):
                     prev_cost = ret
                     assert valid_cost == prev_cost, (valid_cost, prev_cost, new_state, states_open, states_expanded)
 
-            # r = np.random.rand()
-            # if r < epsilon_greedy: # Hanwen: Currently Disable by Parameter Setting
-            #     # Randomly pick one state in the fringe and discard the rest.
-            #     # Note that 'fringe' at this step can have larger than
-            #     # 'beam_size' elements.
-            #     rand_idx = np.random.randint(len(fringe))
-            #     new_fringe = [fringe[rand_idx]]
-            #     # Remove the discarded states from 'open' so that they may be
-            #     # able to be explored down the line.
-            #     for i, fringe_elem in enumerate(fringe):
-            #         if i == rand_idx:
-            #             continue
-            #         _state_cost, _state = fringe_elem
-            #         RemoveFromOpen(_state_cost, _state)
-            #     # Swap.
-            #     fringe = new_fringe
-            #
-            #     # Debugging.
-            #     self.total_random_triggers += 1
-            #     is_eps_greedy_triggered = True
-
-            # Will get this from Shashank
-            cp_hashmap = {
-                "(NL,NL,SS)": 1480.14,
-                "(NL,HJ,IS)": 1632.19,
-                "(HJ,NL,SS)": 1375,
-                "(NL,NL,SS)": 1514,
-                "(HJ,SS,SS)": 1331.63,
-                "(HJ,SS,IS)": 3975.14
-            }
-
             short = {
                 "Nested Loop": "NL",
                 "Hash Join": "HJ",
@@ -584,47 +554,17 @@ class Optimizer(object):
                 right_child = state[0].children[1].node_type  # Merge Join
                 return "({},{},{})".format(short[parent_node], short[left_child], short[right_child])
 
-            def cp_guaranteed_upperbound(cost, state):
-                # 1. Extract substructure based on state
-                substructure = extract_substructure(state)
-                # 2. Fetch the related quantile -> C
-                if substructure in cp_hashmap:
-                    quantile_c = cp_hashmap[substructure]
-                else:
-                    # print("non-shown substructure: ", substructure)
-                    non_shown_counter[substructure] += 1
-                    quantile_c = 100000
-                # 3. Return the upperbound
-                return cost + quantile_c
-
-            # Hanwen: Just to see the running condition in the following else branch - Baseline
-            def substructure_stats(cost, state):
-                substructure = extract_substructure(state)
-                if substructure in cp_hashmap:
-                    shown_counter[substructure] += 1
-                else:
-                    non_shown_counter[substructure] += 1
-                return cost
-
-            if self.cp_assist:  # !!! Will inject the CP here
-                fringe = sorted(fringe, key=lambda x: cp_guaranteed_upperbound(x[0], x[1]))
-            else:  # Baseline
-                fringe = sorted(fringe, key=lambda x: substructure_stats(x[0], x[1]))
+            # Always follow the baseline: Not with the CP
+            # fringe = sorted(fringe, key=lambda x: substructure_stats(x[0], x[1]))
+            fringe = sorted(fringe, key=lambda x: x[0])
 
             fringe = fringe[:beam_size]
 
-        ### From here to process the terminal_state
-        # print("len(terminal_states):", len(terminal_states))
-
-        # for terminal_state in terminal_states:
-        # print(terminal_states)
-        # print()
-
-        print("shown_counter: ", shown_counter)
-        print("non_shown_counter: ", non_shown_counter)
-
         planning_time = (time.time() - planning_start_t) * 1e3
+
         print('Planning took {:.1f}ms'.format(planning_time))
+        # print("[Baseline]shown_counter: ", shown_counter)
+        # print("[Baseline]non_shown_counter: ", non_shown_counter)
 
         # Print terminal_states.
         if verbose:
@@ -634,6 +574,7 @@ class Optimizer(object):
         ## Also will change here
         min_cost = np.min([c for c, s in terminal_states])  # c: cost, s: state
         min_cost_idx = np.argmin([c for c, s in terminal_states])
+
         for i, (cost, state) in enumerate(terminal_states):
             all_found.append((cost, state[0]))
             if verbose:
@@ -648,6 +589,206 @@ class Optimizer(object):
         ret = [
             planning_time, terminal_states[min_cost_idx][1][0],
             terminal_states[min_cost_idx][0]
+        ]
+        if return_all_found:
+            ret.append(all_found)
+
+        self.total_joins += len(query_leaves) - 1
+        self.num_queries_with_random += int(is_eps_greedy_triggered)
+
+        return ret
+
+    def _beam_search_bk_cp(self,
+                           query_node,
+                           beam_size=10,
+                           bushy=False,
+                           return_all_found=False,
+                           planner_config=None,
+                           verbose=False,
+                           avoid_eq_filters=False,
+                           epsilon_greedy=0):
+        """Produce a plan via beam search.
+
+        Args:
+          query_node: a Node, a parsed version of the query to optimize.  In
+            principle we should take the raw SQL string, but this is a
+            convenient proxy.
+          beam_size: size of the fixed set of most promising Nodes to be
+            explored.
+        """
+        if planner_config:
+            if bushy:
+                assert planner_config.search_space == 'bushy', planner_config
+            else:
+                assert planner_config.search_space != 'bushy', planner_config
+        planning_start_t = time.time()
+        # Join graph.
+        join_graph, _ = query_node.GetOrParseSql()
+        # Base tables to join.
+        query_leaves = query_node.GetLeaves()
+        # A "state" is a list of Nodes, each representing a partial plan. If a
+        # state has only one element, then it is a complete plan.
+        init_state = query_leaves
+        # A fringe is a priority queue of (cost of a state, a state).
+        fringe = [(0, init_state)]
+
+        # Bookkeeping of open (unexpanded) and closed (expanded) states.
+        # Reference: page 2 of
+        # https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.435.447&rep=rep1&type=pdf
+        # TODO: can factor out these logic into a Fringe / a FringeState class.
+        # TODO: Unify 'states_open' and 'fringe'.
+        states_open = {}  # StateHash(state) -> cost.
+        states_expanded = {}  # StateHash(state) -> cost.
+
+        def StateHash(state):
+            """Orderless hashing."""
+            return hash(
+                frozenset([
+                    # to_str() is faster than hint_str(); this can be further
+                    # optimized by using shorter strings.
+                    subplan.to_str(with_cost=False) for subplan in state
+                ]))
+
+        def MarkInOpen(state_cost, state, state_hash):
+            states_open[state_hash] = state_cost
+
+        def RemoveFromOpen(state_cost, state):
+            h = StateHash(state)
+            prev_cost = states_open.pop(h)
+            assert prev_cost == state_cost, (prev_cost, state_cost, state,
+                                             states_open)
+
+        def MoveFromOpenToExpanded(state_cost, state):
+            h = StateHash(state)
+            prev_cost = states_open.pop(h)
+            assert prev_cost == state_cost, (prev_cost, state_cost, state,
+                                             states_open)
+            states_expanded[h] = state_cost
+
+        def GetFromOpenOrExpanded(state):
+            h = StateHash(state)
+            ret = states_open.get(h)
+            if ret is not None:
+                return ret, h
+            return states_expanded.get(h), h
+
+        MarkInOpen(0, init_state, StateHash(init_state))
+
+        is_eps_greedy_triggered = False
+
+        terminal_states = []
+        while len(terminal_states) < self.search_until_n_complete_plans and fringe:
+            state_cost, state = fringe.pop(0)
+            MoveFromOpenToExpanded(state_cost, state)
+            if len(state) == 1:
+                # A terminal.
+                terminal_states.append((state_cost, state))
+                continue
+
+            possible_plans = self._get_possible_plans(
+                query_node,
+                state,
+                join_graph,
+                bushy=bushy,
+                planner_config=planner_config,
+                avoid_eq_filters=avoid_eq_filters)
+            costs = self.infer(query_node,
+                               [join for join, _, _ in possible_plans])
+            valid_costs, valid_new_states = self._make_new_states(
+                state, costs, possible_plans)
+
+            for i, (valid_cost,
+                    new_state) in enumerate(zip(valid_costs, valid_new_states)):
+                # Add to open if it is not in open or expanded.
+                ret, state_hash = GetFromOpenOrExpanded(new_state)
+                if ret is None:
+                    fringe.append((valid_cost, new_state))
+                    MarkInOpen(valid_cost, new_state, state_hash)
+                else:
+                    prev_cost = ret
+                    assert valid_cost == prev_cost, (valid_cost, prev_cost, new_state, states_open, states_expanded)
+
+            # CP Specific Data
+            cp_hashmap = {
+                "(NL,NL,IS)": 2038,
+                "(NL,HJ,IS)": 1656,
+                "(NL,NL,SS)": 1668,
+                "(HJ,NL,SS)": 1993,
+                "(HJ,SS,SS)": 3265,
+            }
+
+            short = {
+                "Nested Loop": "NL",
+                "Hash Join": "HJ",
+                "Seq Scan": "SS",
+                "Index Scan": "IS"
+            }
+
+            shown_counter = defaultdict(int)
+            non_shown_counter = defaultdict(int)
+
+            # Given one state, return the related Quantile
+            def extract_substructure(state):
+                parent_node = state[0].node_type  # Hash Join
+                if not state[0].children:
+                    return "None"
+                left_child = state[0].children[0].node_type  # Nested Loop
+                right_child = state[0].children[1].node_type  # Merge Join
+                return "({},{},{})".format(short[parent_node], short[left_child], short[right_child])
+
+            def cp_guaranteed_upperbound(cost, state):
+                # 1. Extract substructure based on state
+                substructure = extract_substructure(state)
+                # 2. Fetch the related quantile -> C
+                if substructure in cp_hashmap:
+                    # shown_counter[substructure] += 1
+                    quantile_c = cp_hashmap[substructure]
+                else:
+                    # print("non-shown substructure: ", substructure)
+                    non_shown_counter[substructure] += 1
+                    quantile_c = 3500
+                # 3. Return the upperbound
+                return cost + quantile_c
+
+            if self.cp_assist:
+                fringe = sorted(fringe, key=lambda x: cp_guaranteed_upperbound(x[0], x[1]))
+
+            fringe = fringe[:beam_size]
+
+        planning_time = (time.time() - planning_start_t) * 1e3
+        print("shown_counter: ", shown_counter)
+        print("non_shown_counter: ", non_shown_counter)
+        print('Planning took {:.1f}ms'.format(planning_time))
+
+        # Print terminal_states.
+        if verbose:
+            print('terminal_states:')
+        all_found = []
+
+        ## Also will change here
+        min_cost = np.min([c for c, s in terminal_states])  # c: cost, s: state
+        min_cost_idx = np.argmin([c for c, s in terminal_states])
+
+        cp_min_cost = np.min([cp_guaranteed_upperbound(c, s) for c, s in terminal_states])  # c: cost, s: state
+        cp_min_cost_idx = np.argmin([cp_guaranteed_upperbound(c, s) for c, s in terminal_states])
+        cp_target_min_cost = terminal_states[cp_min_cost_idx][0]
+
+        print("min_cost: ", min_cost, ", min_cp_cost: ", cp_target_min_cost)
+
+        for i, (cost, state) in enumerate(terminal_states):
+            all_found.append((cost, state[0]))
+            if verbose:
+                if cost == min_cost:
+                    print('  {:.1f} {}  <-- cheapest'.format(
+                        cost,
+                        str([s.hint_str(self.plan_physical) for s in state])))
+                else:
+                    print('  {:.1f} {}'.format(
+                        cost,
+                        str([s.hint_str(self.plan_physical) for s in state])))
+        ret = [
+            planning_time, terminal_states[cp_min_cost_idx][1][0],
+            terminal_states[cp_min_cost_idx][0]
         ]
         if return_all_found:
             ret.append(all_found)

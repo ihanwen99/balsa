@@ -74,10 +74,8 @@ flags.DEFINE_boolean('local', False,
 
 
 def updateCheckpointAndReadMetadata(pt_path):
-    # Step 1: 修改文件路径，将 'checkpoint.pt' 替换为 'checkpoint-metadata.txt'
-    metadata_file = pt_path.replace("checkpoint_199.pt", "checkpoint-metadata.txt")
+    metadata_file = pt_path.replace("checkpoint_49.pt", "checkpoint-metadata.txt")
 
-    # Step 2: 读取文件，提取 'value_iter' 后面的数值
     if os.path.exists(metadata_file):
         with open(metadata_file, 'r') as file:
             content = file.read().strip()
@@ -281,8 +279,7 @@ def ParseExecutionResult(result_tup,
         get_actual_runtime(json_dict["Plan"])
 
     if hint_str is not None:
-        # Check that the hint has been respected.  No need to check if running
-        # baseline.
+        # Check that the hint has been respected.  No need to check if running baseline.
         do_hint_check = True
         if engine == 'dbmsx':
             raise NotImplementedError
@@ -2301,7 +2298,7 @@ def Main(argv):
                          '6b.sql', '6c.sql', '6d.sql', '6e.sql', '6f.sql', '7b.sql', '7c.sql', '8b.sql', '8c.sql',
                          '8d.sql', '9b.sql', '9c.sql', '9d.sql']
 
-    p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20241024_024624-f4xmgfob/files/checkpoint_199.pt"
+    p.agent_checkpoint = "/users/hanwen/balsa/wandb/run-20241024_024624-f4xmgfob/files/checkpoint_49.pt"
     # p.query_dir = "queries/join-order-benchmark-hanwen-test"
     # p.query_glob = ['*.sql']
     p.test_query_glob = ['1b.sql']
